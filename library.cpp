@@ -211,3 +211,79 @@ void bulkImportBooks() {
     }
     cout << "Bulk import complete. Success: " << success << ", Failed: " << fail << "\n";
 }
+void addMember() {
+    if (currentUserRole != "Admin") { cout << "Access denied.\n"; return; }
+    string name, email, phone, address, membership;
+    cout << "Name: "; getline(cin, name);
+    cout << "Email: "; getline(cin, email);
+    if (exists("SELECT * FROM Members WHERE Email='" + email + "'")) {
+        cout << "Email already exists.\n"; return;
+    }
+    cout << "Phone: "; getline(cin, phone);
+    cout << "Address: "; getline(cin, address);
+    cout << "Membership Type (Regular/Premium): "; getline(cin, membership);
+    string sql = "INSERT INTO Members (Name, Email, Phone, Address, MembershipType, JoinDate, Status) VALUES ('" +
+                 name + "','" + email + "','" + phone + "','" + address + "','" + membership + "', GETDATE(), 'Active')";
+    cout << (execSQL(sql) ? "Member added.\n" : "Failed to add member.\n");
+}
+
+void updateMember() {
+    if (currentUserRole != "Admin") { cout << "Access denied.\n"; return; }
+    cout << "Enter email of member to update: ";
+    string email; getline(cin, email);
+    if (!exists("SELECT * FROM Members WHERE Email='" + email + "'")) {
+        cout << "Member not found.\n"; return;
+    }
+    cout << "New phone: "; string phone; getline(cin, phone);
+    cout << "New address: "; string address; getline(cin, address);
+    string sql = "UPDATE Members SET Phone='" + phone + "', Address='" + address + "' WHERE Email='" + email + "'";
+    cout << (execSQL(sql) ? "Member updated.\n" : "Failed to update.\n");
+}
+
+void deleteMember() {
+    if (currentUserRole != "Admin") { cout << "Access denied.\n"; return; }
+    cout << "Enter email of member to delete: ";
+    string email; getline(cin, email);
+    if (!exists("SELECT * FROM Members WHERE Email='" + email + "'")) {
+        cout << "Member not found.\n"; return;
+    }
+    string sql = "UPDATE Members SET Status='Inactive' WHERE Email='" + email + "'";
+    cout << (execSQL(sql) ? "Member deactivated.\n" : "Failed to deactivate.\n");
+}
+
+void viewMembers() {
+    SQLHSTMT stmt;
+    SQLAllocHandle(SQL_HANDLE_STMT, dbc, &stmt);
+    string sql = "SELECT MemberID, Name, Email, Status FROM Members";
+    if (SQLExecDirect(stmt, (SQLCHAR*)sql.c_str(), SQL_NTS) == SQL_SUCCESS) {
+        cout << "\nID\tName\tEmail\tStatus\n";
+        while (SQLFetch(stmt) == SQL_SUCCESS) {
+            int id; char name[255], email[255], status[20];
+            SQLGetData(stmt, 1, SQL_C_SLONG, &id, 0, NULL);
+            SQLGetData(stmt, 2, SQL_C_CHAR, name, sizeof(name), NULL);
+            SQLGetData(stmt, 3, SQL_C_CHAR, email, sizeof(email), NULL);
+            SQLGetData(stmt, 4, SQL_C_CHAR, status, sizeof(status), NULL);
+            cout << id << "\t" << name << "\t" << email << "\t" << status << "\n";
+        }
+    }
+    SQLFreeHandle(SQL_HANDLE_STMT, stmt);
+}
+
+void searchMembers() {
+    cout << "Enter name/email to search: ";
+    string keyword; getline(cin, keyword);
+    string sql = "SELECT MemberID, Name, Email FROM Members WHERE Name LIKE '%" + keyword + "%' OR Email LIKE '%" + keyword + "%'";
+    SQLHSTMT stmt;
+    SQLAllocHandle(SQL_HANDLE_STMT, dbc, &stmt);
+    if (SQLExecDirect(stmt, (SQLCHAR*)sql.c_str(), SQL_NTS) == SQL_SUCCESS) {
+        cout << "\nID\tName\tEmail\n";
+        while (SQLFetch(stmt) == SQL_SUCCESS) {
+            int id; char name[255], email[255];
+            SQLGetData(stmt, 1, SQL_C_SLONG, &id, 0, NULL);
+            SQLGetData(stmt, 2, SQL_C_CHAR, name, sizeof(name), NULL);
+            SQLGetData(stmt, 3, SQL_C_CHAR, email, sizeof(email), NULL);
+            cout << id << "\t" << name << "\t" << email << "\n";
+        }
+    }
+    SQLFreeHandle(SQL_HANDLE_STMT, stmt);
+}
