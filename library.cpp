@@ -470,3 +470,39 @@ void memberMenu() {
         else cout << "Invalid option.\n";
     } while (true);
 }
+void transactionMenu() {
+    string choice;
+    do {
+        cout << "\n--- Transactions Menu ---\n";
+ 
+        if (currentUserRole == "Admin") {
+            cout << "1. Issue Book\n";
+            cout << "2. Return Book\n";
+            cout << "3. Reserve Book\n";
+            cout << "4. Transaction History\n";
+        } else {
+            cout << "1. Return Book\n";
+            cout << "2. Reserve Book\n";
+            cout << "3. View Transaction History\n";
+        }
+ 
+        cout << "0. Back\n> ";
+        getline(cin, choice);
+ 
+        if (currentUserRole == "Admin") {
+            if (choice == "1") issueBook();
+            else if (choice == "2") returnBook();
+            else if (choice == "3") reserveBook();
+            else if (choice == "4") transactionHistory();
+            else if (choice == "0") break;
+            else cout << "Invalid option.\n";
+        } else {
+            if (choice == "1") returnBook();
+            else if (choice == "2") reserveBook();
+            else if (choice == "3") transactionHistory();
+            else if (choice == "0") break;
+            else cout << "Invalid option.\n";
+        }
+    } while (true);
+}
+
