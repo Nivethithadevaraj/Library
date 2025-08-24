@@ -41,3 +41,173 @@ bool execSQL(const string& sql) {
     SQLFreeHandle(SQL_HANDLE_STMT, stmt);
     return SQL_SUCCEEDED(ret);
 }
+bool login() {
+    string username, password;
+    cout << "\n=== Login ===\nUsername: ";
+    getline(cin, username);
+    cout << "Password: ";
+    getline(cin, password);
+
+    string sql = "SELECT Role FROM Users WHERE Username='" + username +
+                 "' AND Password='" + password + "'";
+    SQLHSTMT stmt;
+    if (!SQL_SUCCEEDED(SQLAllocHandle(SQL_HANDLE_STMT, dbc, &stmt))) return false;
+    if (!SQL_SUCCEEDED(SQLExecDirect(stmt, (SQLCHAR*)sql.c_str(), SQL_NTS))) {
+        showError("Login", stmt, SQL_HANDLE_STMT);
+        SQLFreeHandle(SQL_HANDLE_STMT, stmt); return false;
+    }
+
+    SQLCHAR role[20];
+    if (SQLFetch(stmt) == SQL_SUCCESS) {
+        SQLGetData(stmt, 1, SQL_C_CHAR, role, sizeof(role), NULL);
+        SQLFreeHandle(SQL_HANDLE_STMT, stmt);
+        currentUserRole = (char*)role;
+        cout << "Login successful. Role: " << currentUserRole << "\n";
+        return true;
+    } else {
+        cout << "Invalid credentials.\n";
+        SQLFreeHandle(SQL_HANDLE_STMT, stmt);
+        return false;
+    }
+}
+
+void addBook() {
+    if (currentUserRole != "Admin") {
+        cout << "Access denied. Only admin can perform this action.\n";
+        return;
+    }
+    string title, author, genre, publisher, isbn, edition, rack, language;
+    int year;
+    double price;
+
+    cout << "Title: "; getline(cin, title);
+    cout << "Author: "; getline(cin, author);
+    cout << "Genre: "; getline(cin, genre);
+    cout << "Publisher: "; getline(cin, publisher);
+    cout << "ISBN (unique): "; getline(cin, isbn);
+    if (exists("SELECT * FROM Books WHERE ISBN='" + isbn + "'")) {
+        cout << "ISBN already exists.\n"; return;
+    }
+    cout << "Edition: "; getline(cin, edition);
+    cout << "Published Year: "; cin >> year; cin.ignore();
+    cout << "Price: "; cin >> price; cin.ignore();
+    cout << "Rack Location: "; getline(cin, rack);
+    cout << "Language: "; getline(cin, language);
+
+    string sql = "INSERT INTO Books (Title, Author, Genre, Publisher, ISBN, Edition, PublishedYear, Price, RackLocation, Language, Availability) VALUES ('" +
+                 title + "','" + author + "','" + genre + "','" + publisher + "','" + isbn + "','" + edition + "'," +
+                 to_string(year) + "," + to_string(price) + ",'" + rack + "','" + language + "', 1)";
+    cout << (execSQL(sql) ? "Book added successfully.\n" : "Failed to add book.\n");
+}
+
+void updateBook() {
+    if (currentUserRole != "Admin") { cout << "Access denied.\n"; return; }
+    string isbn;
+    cout << "Enter ISBN to update: "; getline(cin, isbn);
+    if (!exists("SELECT * FROM Books WHERE ISBN='" + isbn + "'")) {
+        cout << "Book not found.\n"; return;
+    }
+    string title, genre;
+    cout << "New Title (leave blank to skip): "; getline(cin, title);
+    cout << "New Genre (leave blank to skip): "; getline(cin, genre);
+
+    string sql = "UPDATE Books SET ";
+    if (!title.empty()) sql += "Title='" + title + "'";
+    if (!genre.empty()) {
+        if (!title.empty()) sql += ", ";
+        sql += "Genre='" + genre + "'";
+    }
+    sql += " WHERE ISBN='" + isbn + "'";
+    cout << (execSQL(sql) ? "Book updated.\n" : "Update failed.\n");
+}
+
+void deleteBook() {
+    if (currentUserRole != "Admin") { cout << "Access denied.\n"; return; }
+    string isbn;
+    cout << "Enter ISBN to delete: "; getline(cin, isbn);
+    if (!exists("SELECT * FROM Books WHERE ISBN='" + isbn + "'")) {
+        cout << "Book not found.\n"; return;
+    }
+    string check = "SELECT * FROM Transactions WHERE BookID = (SELECT BookID FROM Books WHERE ISBN='" + isbn + "') AND ReturnDate IS NULL";
+    if (exists(check)) {
+        cout << "Book currently issued, cannot delete.\n"; return;
+    }
+    cout << (execSQL("DELETE FROM Books WHERE ISBN='" + isbn + "'") ? "Book deleted.\n" : "Delete failed.\n");
+}
+
+void viewBooks() {
+    int pageSize = 5, page = 0;
+    string choice;
+    do {
+        int offset = page * pageSize;
+        string sql = "SELECT BookID, Title, ISBN, Availability FROM Books ORDER BY Title OFFSET " +
+                     to_string(offset) + " ROWS FETCH NEXT " + to_string(pageSize) + " ROWS ONLY";
+        SQLHSTMT stmt;
+        SQLAllocHandle(SQL_HANDLE_STMT, dbc, &stmt);
+        if (SQLExecDirect(stmt, (SQLCHAR*)sql.c_str(), SQL_NTS) == SQL_SUCCESS) {
+            cout << "\nPage " << page + 1 << "\nID\tTitle\tISBN\tAvailable\n";
+            while (SQLFetch(stmt) == SQL_SUCCESS) {
+                int id, avail;
+                char title[255], isbn[20];
+                SQLGetData(stmt, 1, SQL_C_SLONG, &id, 0, NULL);
+                SQLGetData(stmt, 2, SQL_C_CHAR, title, sizeof(title), NULL);
+                SQLGetData(stmt, 3, SQL_C_CHAR, isbn, sizeof(isbn), NULL);
+                SQLGetData(stmt, 4, SQL_C_LONG, &avail, 0, NULL);
+                cout << id << "\t" << title << "\t" << isbn << "\t" << (avail ? "Yes" : "No") << "\n";
+            }
+        }
+        SQLFreeHandle(SQL_HANDLE_STMT, stmt);
+        cout << "[N]ext, [P]revious, [Q]uit: ";
+        getline(cin, choice);
+        if (choice == "N" || choice == "n") page++;
+        else if ((choice == "P" || choice == "p") && page > 0) page--;
+    } while (choice != "Q" && choice != "q");
+}
+
+void searchBooks() {
+    cout << "Enter keyword to search in title: ";
+    string keyword;
+    getline(cin, keyword);
+    string sql = "SELECT BookID, Title, ISBN FROM Books WHERE Title LIKE '%" + keyword + "%'";
+    SQLHSTMT stmt;
+    SQLAllocHandle(SQL_HANDLE_STMT, dbc, &stmt);
+    if (SQLExecDirect(stmt, (SQLCHAR*)sql.c_str(), SQL_NTS) == SQL_SUCCESS) {
+        cout << "ID\tTitle\tISBN\n";
+        while (SQLFetch(stmt) == SQL_SUCCESS) {
+            int id;
+            char title[255], isbn[20];
+            SQLGetData(stmt, 1, SQL_C_SLONG, &id, 0, NULL);
+            SQLGetData(stmt, 2, SQL_C_CHAR, title, sizeof(title), NULL);
+            SQLGetData(stmt, 3, SQL_C_CHAR, isbn, sizeof(isbn), NULL);
+            cout << id << "\t" << title << "\t" << isbn << "\n";
+        }
+    }
+    SQLFreeHandle(SQL_HANDLE_STMT, stmt);
+}
+
+void bulkImportBooks() {
+    if (currentUserRole != "Admin") { cout << "Access denied.\n"; return; }
+    cout << "Enter CSV file path: ";
+    string file;
+    getline(cin, file);
+    ifstream in(file);
+    if (!in) { cout << "File not found.\n"; return; }
+    string line; int success = 0, fail = 0, lineNo = 0;
+    while (getline(in, line)) {
+        lineNo++;
+        if (line.empty()) continue;
+        stringstream ss(line);
+        string title, author, genre, publisher, isbn, edition, year, price, rack, lang;
+        if (!getline(ss, title, ',') || !getline(ss, author, ',') || !getline(ss, genre, ',') ||
+            !getline(ss, publisher, ',') || !getline(ss, isbn, ',') || !getline(ss, edition, ',') ||
+            !getline(ss, year, ',') || !getline(ss, price, ',') || !getline(ss, rack, ',') || !getline(ss, lang)) {
+            cout << "Line " << lineNo << ": Incorrect format.\n"; fail++; continue;
+        }
+        string sql = "INSERT INTO Books (Title, Author, Genre, Publisher, ISBN, Edition, PublishedYear, Price, RackLocation, Language, Availability) VALUES ('" +
+                     title + "','" + author + "','" + genre + "','" + publisher + "','" + isbn + "','" + edition + "'," +
+                     year + "," + price + ",'" + rack + "','" + lang + "', 1)";
+        if (execSQL(sql)) success++;
+        else { cout << "Line " << lineNo << ": Failed to insert.\n"; fail++; }
+    }
+    cout << "Bulk import complete. Success: " << success << ", Failed: " << fail << "\n";
+}
