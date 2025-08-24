@@ -287,3 +287,186 @@ void searchMembers() {
     }
     SQLFreeHandle(SQL_HANDLE_STMT, stmt);
 }
+void bookMenu() {
+    string choice;
+    do {
+        cout << "\n--- Books Menu ---\n";
+        cout << "1. View\n2. Search\n3. Bulk Import\n";
+        if (currentUserRole == "Admin") {
+            cout << "4. Add Book\n5. Update Book\n6. Delete Book\n";
+        }
+        cout << "0. Back\n> ";
+        getline(cin, choice);
+        if (choice == "1") viewBooks();
+        else if (choice == "2") searchBooks();
+        else if (choice == "3" && currentUserRole == "Admin") bulkImportBooks();
+        else if (choice == "4" && currentUserRole == "Admin") addBook();
+        else if (choice == "5" && currentUserRole == "Admin") updateBook();
+        else if (choice == "6" && currentUserRole == "Admin") deleteBook();
+        else if (choice == "0") break;
+        else cout << "Invalid option.\n";
+    } while (true);
+}
+void issueBook() {
+    int memberId, bookId;
+    cout << "Enter Member ID: ";
+    cin >> memberId;
+    cout << "Enter Book ID: ";
+    cin >> bookId;
+    cin.ignore();
+ 
+    // Check book availability
+    string checkBookSQL = "SELECT availability FROM books WHERE bookid = " + to_string(bookId);
+    SQLHSTMT stmt;
+    SQLAllocHandle(SQL_HANDLE_STMT, dbc, &stmt);
+    SQLExecDirect(stmt, (SQLCHAR*)checkBookSQL.c_str(), SQL_NTS);
+   
+    int available = 0;
+    if (SQLFetch(stmt) == SQL_SUCCESS)
+        SQLGetData(stmt, 1, SQL_C_LONG, &available, 0, NULL);
+    SQLFreeHandle(SQL_HANDLE_STMT, stmt);
+ 
+    if (!available) {
+        cout << "Book is not available.\n";
+        return;
+    }
+ 
+    // Max 5 books rule
+    string checkLimitSQL = "SELECT COUNT(*) FROM transactions WHERE memberid = " + to_string(memberId) + " AND returndate IS NULL";
+    SQLAllocHandle(SQL_HANDLE_STMT, dbc, &stmt);
+    SQLExecDirect(stmt, (SQLCHAR*)checkLimitSQL.c_str(), SQL_NTS);
+ 
+    int count = 0;
+    if (SQLFetch(stmt) == SQL_SUCCESS)
+        SQLGetData(stmt, 1, SQL_C_LONG, &count, 0, NULL);
+    SQLFreeHandle(SQL_HANDLE_STMT, stmt);
+ 
+    if (count >= 5) {
+        cout << "Member has reached max limit (5 books).\n";
+        return;
+    }
+ 
+    string sql = "INSERT INTO transactions (memberid, bookid, issuedate, duedate) VALUES (" +
+                 to_string(memberId) + "," + to_string(bookId) + ", GETDATE(), DATEADD(day, 14, GETDATE()))";
+    if (execSQL(sql)) {
+        execSQL("UPDATE books SET availability = 0 WHERE bookid = " + to_string(bookId));
+        cout << "Book issued successfully.\n";
+    } else {
+        cout << "Failed to issue book.\n";
+    }
+}
+void returnBook() {
+    int bookId;
+    cout << "Enter Book ID to return: ";
+    cin >> bookId;
+    cin.ignore();
+ 
+    string sql = "SELECT transactionid, DATEDIFF(day, duedate, GETDATE()) AS late_days "
+                 "FROM transactions WHERE bookid = " + to_string(bookId) + " AND returndate IS NULL";
+ 
+    SQLHSTMT stmt;
+    SQLAllocHandle(SQL_HANDLE_STMT, dbc, &stmt);
+    if (SQLExecDirect(stmt, (SQLCHAR*)sql.c_str(), SQL_NTS) != SQL_SUCCESS) {
+        SQLFreeHandle(SQL_HANDLE_STMT, stmt);
+        cout << "Error retrieving transaction.\n";
+        return;
+    }
+ 
+    int txId = 0, lateDays = 0;
+    if (SQLFetch(stmt) == SQL_SUCCESS) {
+        SQLGetData(stmt, 1, SQL_C_SLONG, &txId, 0, NULL);
+        SQLGetData(stmt, 2, SQL_C_SLONG, &lateDays, 0, NULL);
+    } else {
+        cout << "No active transaction found.\n";
+        SQLFreeHandle(SQL_HANDLE_STMT, stmt);
+        return;
+    }
+    SQLFreeHandle(SQL_HANDLE_STMT, stmt);
+ 
+    double fine = lateDays > 0 ? lateDays * 5.0 : 0.0;
+    string updateSQL = "UPDATE transactions SET returndate = GETDATE(), fineamount = " + to_string(fine) +
+                       " WHERE transactionid = " + to_string(txId);
+    execSQL(updateSQL);
+    execSQL("UPDATE books SET availability = 1 WHERE bookid = " + to_string(bookId));
+    cout << "Book returned. Fine: ₹" << fine << "\n";
+}
+ 
+void reserveBook() {
+    int bookId, memberId;
+    cout << "Enter Book ID to reserve: ";
+    cin >> bookId;
+    cout << "Enter Member ID: ";
+    cin >> memberId;
+    cin.ignore();
+ 
+    string check = "SELECT * FROM books WHERE bookid = " + to_string(bookId) + " AND availability = 0";
+    if (!exists(check)) {
+        cout << "Book is available, no need to reserve.\n";
+        return;
+    }
+ 
+    // We simulate reservation queue by inserting dummy transaction without dates
+    string sql = "INSERT INTO transactions (memberid, bookid) VALUES (" + to_string(memberId) + ", " + to_string(bookId) + ")";
+    if (execSQL(sql))
+        cout << "Book reserved successfully.\n";
+    else
+        cout << "Failed to reserve.\n";
+}
+ 
+void transactionHistory() {
+    string filter;
+    cout << "Search by:\n1. Member ID\n2. Book ID\n> ";
+    getline(cin, filter);
+ 
+    string input;
+    cout << "Enter ID: ";
+    getline(cin, input);
+ 
+    string sql = string("SELECT transactionid, memberid, bookid, issuedate, duedate, returndate, fineamount ")
+           + "FROM transactions WHERE " + (filter == "1" ? "memberid" : "bookid") + " = " + input;
+ 
+    SQLHSTMT stmt;
+    SQLAllocHandle(SQL_HANDLE_STMT, dbc, &stmt);
+    if (SQLExecDirect(stmt, (SQLCHAR*)sql.c_str(), SQL_NTS) == SQL_SUCCESS) {
+        cout << "\nID\tMemID\tBookID\tIssue\tDue\tReturn\tFine\n";
+        while (SQLFetch(stmt) == SQL_SUCCESS) {
+            int tx, mem, bk;
+            char issue[20], due[20], ret[20];
+            double fine;
+            SQLGetData(stmt, 1, SQL_C_SLONG, &tx, 0, NULL);
+            SQLGetData(stmt, 2, SQL_C_SLONG, &mem, 0, NULL);
+            SQLGetData(stmt, 3, SQL_C_SLONG, &bk, 0, NULL);
+            SQLGetData(stmt, 4, SQL_C_CHAR, issue, sizeof(issue), NULL);
+            SQLGetData(stmt, 5, SQL_C_CHAR, due, sizeof(due), NULL);
+            SQLGetData(stmt, 6, SQL_C_CHAR, ret, sizeof(ret), NULL);
+            SQLGetData(stmt, 7, SQL_C_DOUBLE, &fine, 0, NULL);
+ 
+            cout << tx << "\t" << mem << "\t" << bk << "\t" << issue << "\t" << due << "\t" << ret << "\t" << fine << "\n";
+        }
+    } else {
+        cout << "No records found.\n";
+    }
+    SQLFreeHandle(SQL_HANDLE_STMT, stmt);
+}
+ 
+ 
+ 
+void memberMenu() {
+    string choice;
+    do {
+        cout << "\n--- Members Menu ---\n";
+        cout << "1. View Members\n2. Search Members\n";
+        if (currentUserRole == "Admin") {
+            cout << "3. Add Member\n4. Update Member\n5. Delete Member\n";
+        }
+        cout << "0. Back\n> ";
+        getline(cin, choice);
+        if (choice == "1") viewMembers();
+        else if (choice == "2") searchMembers();
+        else if (choice == "3" && currentUserRole == "Admin") addMember();
+        else if (choice == "4" && currentUserRole == "Admin") updateMember();
+        else if (choice == "5" && currentUserRole == "Admin") deleteMember();
+        else if (choice == "0") break;
+        else cout << "Invalid option.\n";
+    } while (true);
+}
