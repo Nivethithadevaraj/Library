@@ -506,3 +506,226 @@ void transactionMenu() {
     } while (true);
 }
 
+void showFineSummaryMonthly(SQLHDBC dbc) {
+    SQLHSTMT stmt;
+    if (!SQL_SUCCEEDED(SQLAllocHandle(SQL_HANDLE_STMT, dbc, &stmt))) {
+        cout << "Failed to allocate statement handle.\n";
+        return;
+    }
+
+    const string query = R"(
+        SELECT 
+            YEAR(ReturnDate) AS Year,
+            MONTH(ReturnDate) AS Month,
+            SUM(FineAmount) AS TotalFinesCollected
+        FROM Transactions
+        WHERE ReturnDate IS NOT NULL AND FineAmount IS NOT NULL
+        GROUP BY YEAR(ReturnDate), MONTH(ReturnDate)
+        ORDER BY Year, Month
+    )";
+
+    if (SQLExecDirect(stmt, (SQLCHAR*)query.c_str(), SQL_NTS) == SQL_SUCCESS) {
+        int year = 0, month = 0;
+        double totalFines = 0.0;
+
+        SQLBindCol(stmt, 1, SQL_C_SLONG, &year, 0, NULL);
+        SQLBindCol(stmt, 2, SQL_C_SLONG, &month, 0, NULL);
+        SQLBindCol(stmt, 3, SQL_C_DOUBLE, &totalFines, 0, NULL);
+
+        cout << "\nMonthly Fine Summary:\n";
+        cout << "---------------------------------\n";
+        cout << left << setw(6) << "Year" << setw(8) << "Month" << "Total Fines\n";
+        cout << "---------------------------------\n";
+
+        while (SQLFetch(stmt) == SQL_SUCCESS) {
+            cout << left << setw(6) << year << setw(8) << month << fixed << setprecision(2) << totalFines << "\n";
+        }
+    } else {
+        cout << "Failed to fetch fine summary.\n";
+    }
+
+    SQLFreeHandle(SQL_HANDLE_STMT, stmt);
+}
+
+void showActiveMembers(SQLHDBC dbc) {
+    SQLHSTMT stmt;
+    if (!SQL_SUCCEEDED(SQLAllocHandle(SQL_HANDLE_STMT, dbc, &stmt))) {
+        cout << "Failed to allocate statement handle.\n";
+        return;
+    }
+
+    const string query = R"(
+        SELECT TOP 10
+            m.Name,
+            COUNT(t.TransactionID) AS BooksIssued
+        FROM Members m
+        JOIN Transactions t ON m.MemberID = t.MemberID
+        WHERE t.IssueDate IS NOT NULL
+        GROUP BY m.Name
+        ORDER BY BooksIssued DESC
+    )";
+
+    if (SQLExecDirect(stmt, (SQLCHAR*)query.c_str(), SQL_NTS) == SQL_SUCCESS) {
+        char name[256];
+        int booksIssued = 0;
+
+        SQLBindCol(stmt, 1, SQL_C_CHAR, name, sizeof(name), NULL);
+        SQLBindCol(stmt, 2, SQL_C_SLONG, &booksIssued, 0, NULL);
+
+        cout << "\nActive Members (Top 10):\n";
+        cout << "----------------------------------------\n";
+        cout << left << setw(30) << "Name" << "Books Issued\n";
+        cout << "----------------------------------------\n";
+
+        while (SQLFetch(stmt) == SQL_SUCCESS) {
+            cout << left << setw(30) << name << booksIssued << "\n";
+        }
+    } else {
+        cout << "Failed to fetch active members.\n";
+    }
+
+    SQLFreeHandle(SQL_HANDLE_STMT, stmt);
+}
+
+void showTopIssuedBooks(SQLHDBC dbc) {
+    SQLHSTMT stmt;
+    if (!SQL_SUCCEEDED(SQLAllocHandle(SQL_HANDLE_STMT, dbc, &stmt))) {
+        cout << "Failed to allocate statement handle.\n";
+        return;
+    }
+
+    const string query = R"(
+        SELECT TOP 10 
+            b.Title,
+            COUNT(t.TransactionID) AS IssueCount
+        FROM Books b
+        JOIN Transactions t ON b.BookID = t.BookID
+        WHERE t.IssueDate IS NOT NULL
+        GROUP BY b.Title
+        ORDER BY IssueCount DESC
+    )";
+
+    if (SQLExecDirect(stmt, (SQLCHAR*)query.c_str(), SQL_NTS) == SQL_SUCCESS) {
+        char title[256];
+        int issueCount = 0;
+
+        SQLBindCol(stmt, 1, SQL_C_CHAR, title, sizeof(title), NULL);
+        SQLBindCol(stmt, 2, SQL_C_SLONG, &issueCount, 0, NULL);
+
+        cout << "\nTop Issued Books (Top 10):\n";
+        cout << "----------------------------------------\n";
+        cout << left << setw(30) << "Title" << "Issue Count\n";
+        cout << "----------------------------------------\n";
+
+        while (SQLFetch(stmt) == SQL_SUCCESS) {
+            cout << left << setw(30) << title << issueCount << "\n";
+        }
+    } else {
+        cout << "Failed to fetch top issued books.\n";
+    }
+
+    SQLFreeHandle(SQL_HANDLE_STMT, stmt);
+}
+
+void showTotalFineCollected(SQLHDBC dbc) {
+    SQLHSTMT stmt;
+    if (!SQL_SUCCEEDED(SQLAllocHandle(SQL_HANDLE_STMT, dbc, &stmt))) {
+        cout << "Failed to allocate statement handle.\n";
+        return;
+    }
+
+    const string query = R"(
+        SELECT SUM(FineAmount) AS TotalFineCollected
+        FROM Transactions
+        WHERE FineAmount IS NOT NULL
+    )";
+
+    if (SQLExecDirect(stmt, (SQLCHAR*)query.c_str(), SQL_NTS) == SQL_SUCCESS) {
+        double totalFine = 0.0;
+        SQLBindCol(stmt, 1, SQL_C_DOUBLE, &totalFine, 0, NULL);
+
+        cout << "\nTotal Fine Collected:\n";
+        cout << "---------------------\n";
+
+        if (SQLFetch(stmt) == SQL_SUCCESS) {
+            cout << fixed << setprecision(2) << totalFine << "\n";
+        } else {
+            cout << "No fine data available.\n";
+        }
+    } else {
+        cout << "Failed to fetch total fine collected.\n";
+    }
+
+    SQLFreeHandle(SQL_HANDLE_STMT, stmt);
+}
+
+void reportMenu() {
+    if (currentUserRole != "Admin") {
+        cout << "Access Denied. Only Admins can view reports.\n";
+        return;
+    }
+
+    int choice;
+    do {
+        cout << "\n========== Reports Menu ==========\n";
+        cout << "1. Top Issued Books\n";
+        cout << "2. Active Members\n";
+        cout << "3. Fine Summary (Monthly)\n";
+        cout << "4. Total Fine Collected\n";
+        cout << "5. Back to Main Menu\n";
+        cout << "==================================\n";
+        cout << "Enter your choice: ";
+        cin >> choice;
+        cin.ignore();
+
+        switch (choice) {
+            case 1: showTopIssuedBooks(dbc); break;
+            case 2: showActiveMembers(dbc); break;
+            case 3: showFineSummaryMonthly(dbc); break;
+            case 4: showTotalFineCollected(dbc); break;
+            case 5: return;
+            default: cout << "Invalid choice.\n"; break;
+        }
+    } while (true);
+}
+
+void mainMenu() {
+    string choice;
+    do {
+        cout << "\n========== Library Management ==========\n"
+             << "1. Books Management\n"
+             << "2. Members Management\n"
+             << "3. Transactions\n"
+             << "4. Reports\n"
+             << "5. Exit\n> ";
+        getline(cin, choice);
+
+        if (choice == "1") bookMenu();
+        else if (choice == "2") memberMenu();
+        else if (choice == "3") transactionMenu();
+        else if (choice == "4") reportMenu();  // Make sure reportMenu() is defined and uses global variables
+        else if (choice == "5") break;
+        else cout << "Invalid option.\n";
+    } while (true);
+}
+
+int main() {
+    SQLAllocHandle(SQL_HANDLE_ENV, SQL_NULL_HANDLE, &env);
+    SQLSetEnvAttr(env, SQL_ATTR_ODBC_VERSION, (void*)SQL_OV_ODBC3, 0);
+    SQLAllocHandle(SQL_HANDLE_DBC, env, &dbc);
+    SQLCHAR connStr[] = "DRIVER={ODBC Driver 17 for SQL Server};SERVER=PSILENL023;DATABASE=Library;Trusted_Connection=Yes;";
+    if (!SQL_SUCCEEDED(SQLDriverConnect(dbc, NULL, connStr, SQL_NTS, NULL, 0, NULL, SQL_DRIVER_COMPLETE))) {
+        showError("Connection", dbc, SQL_HANDLE_DBC);
+        return 1;
+    }
+    if (!login()) {
+        SQLDisconnect(dbc); SQLFreeHandle(SQL_HANDLE_DBC, dbc); SQLFreeHandle(SQL_HANDLE_ENV, env);
+        return 0;
+    }
+    mainMenu();
+
+    SQLDisconnect(dbc);
+    SQLFreeHandle(SQL_HANDLE_DBC, dbc);
+    SQLFreeHandle(SQL_HANDLE_ENV, env);
+    return 0;
+}
